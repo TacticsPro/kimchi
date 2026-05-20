@@ -47,6 +47,7 @@ import telemetryExtension from "./extensions/telemetry.js"
 import terminalColorsExtension from "./extensions/terminal-colors.js"
 import { probeKittyKeyboardSupport } from "./extensions/terminal-compat/keyboard-capability.js"
 import { emitTerminalCompatWarning } from "./extensions/terminal-compat/startup-warning.js"
+import tipsExtension from "./extensions/tips/index.js"
 import toolRendererExtension from "./extensions/tool-renderer.js"
 import uiExtension from "./extensions/ui.js"
 import webFetchExtension from "./extensions/web-fetch/index.js"
@@ -317,6 +318,7 @@ try {
 			clipboardImageExtension,
 			uiExtension,
 			sessionModeOnboarding,
+			tipsExtension(),
 			agentsExtension,
 			tagsExtension,
 			telemetryExtension(telemetryConfig),
