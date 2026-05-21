@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI, ExtensionContext, ExtensionFactory, WidgetPlacement } from "@earendil-works/pi-coding-agent"
 import { createGeneralTipProvider } from "./general-tips.js"
 import { TipPresenter } from "./presenter.js"
 import { type TipRegistry, globalTipRegistry } from "./registry.js"
@@ -6,7 +6,41 @@ import { TipRow } from "./tip-row.js"
 import type { TipProvider } from "./types.js"
 
 export const TIPS_WIDGET_KEY = "kimchi-tips"
-const TIPS_WIDGET_OPTIONS = { placement: "aboveEditor" } as const
+type VisibleTipWidgetLocation = Extract<WidgetPlacement, "aboveEditor">
+export type TipWidgetLocation = VisibleTipWidgetLocation | "hidden"
+
+const DEFAULT_TIP_WIDGET_LOCATION: TipWidgetLocation = "aboveEditor"
+let tipWidgetLocation: TipWidgetLocation = DEFAULT_TIP_WIDGET_LOCATION
+let onLocationChange: (() => void) | undefined
+
+export function setTipWidgetLocation(location: TipWidgetLocation): () => void {
+	const previous = tipWidgetLocation
+	updateTipWidgetLocation(location)
+
+	let restored = false
+	return () => {
+		if (restored) return
+		restored = true
+		updateTipWidgetLocation(previous)
+	}
+}
+
+function tipWidgetOptions(location: VisibleTipWidgetLocation): { placement: VisibleTipWidgetLocation } {
+	return { placement: location }
+}
+
+function updateTipWidgetLocation(location: TipWidgetLocation): void {
+	if (tipWidgetLocation === location) return
+	tipWidgetLocation = location
+	onLocationChange?.()
+}
+
+function onTipWidgetLocationChange(listener: () => void): () => void {
+	onLocationChange = listener
+	return () => {
+		if (onLocationChange === listener) onLocationChange = undefined
+	}
+}
 
 export interface TipsExtensionOptions {
 	registry?: TipRegistry
@@ -19,18 +53,29 @@ export default function tipsExtension(options: TipsExtensionOptions = {}): Exten
 		const generalProvider = options.generalProvider ?? createGeneralTipProvider()
 		const presenter = new TipPresenter(registry)
 		let unregisterGeneral: (() => void) | undefined
+		let unregisterLocationChange: (() => void) | undefined
 		let activeCtx: ExtensionContext | undefined
 		let activeTui: { requestRender?(): void } | undefined
 		let widgetMounted = false
+		let mountedLocation: VisibleTipWidgetLocation | undefined
+
+		const unmountWidget = (ctx: ExtensionContext | undefined = activeCtx) => {
+			if (widgetMounted && ctx?.hasUI && mountedLocation) {
+				ctx.ui.setWidget(TIPS_WIDGET_KEY, undefined, tipWidgetOptions(mountedLocation))
+			}
+			widgetMounted = false
+			mountedLocation = undefined
+			activeTui = undefined
+		}
 
 		const clearWidget = () => {
-			if (widgetMounted && activeCtx?.hasUI) activeCtx.ui.setWidget(TIPS_WIDGET_KEY, undefined, TIPS_WIDGET_OPTIONS)
-			widgetMounted = false
-			activeTui = undefined
+			unmountWidget()
 			activeCtx = undefined
 		}
 
 		const mountWidget = (ctx: ExtensionContext) => {
+			const location = tipWidgetLocation
+			if (location === "hidden") return
 			if (widgetMounted) return
 			if (!presenter.getCurrentTip()) return
 
@@ -40,15 +85,21 @@ export default function tipsExtension(options: TipsExtensionOptions = {}): Exten
 					activeTui = tui
 					return new TipRow(() => presenter.getCurrentTip(), theme)
 				},
-				TIPS_WIDGET_OPTIONS,
+				tipWidgetOptions(location),
 			)
 			widgetMounted = true
+			mountedLocation = location
 		}
 
 		const updateWidget = (ctx: ExtensionContext) => {
 			if (!ctx.hasUI) return
+			activeCtx = ctx
+			if (tipWidgetLocation === "hidden") {
+				unmountWidget(ctx)
+				return
+			}
 			if (!presenter.getCurrentTip()) {
-				clearWidget()
+				unmountWidget(ctx)
 				return
 			}
 			mountWidget(ctx)
@@ -59,12 +110,14 @@ export default function tipsExtension(options: TipsExtensionOptions = {}): Exten
 			clearWidget()
 			presenter.clear()
 			unregisterGeneral?.()
+			unregisterLocationChange?.()
 			unregisterGeneral = registry.registerProvider(generalProvider)
+			unregisterLocationChange = onTipWidgetLocationChange(() => {
+				if (activeCtx) updateWidget(activeCtx)
+			})
 			activeCtx = ctx
 
-			if (!ctx.hasUI) return
-
-			mountWidget(ctx)
+			updateWidget(ctx)
 		})
 
 		pi.on("turn_end", (_event, ctx) => {
@@ -77,6 +130,8 @@ export default function tipsExtension(options: TipsExtensionOptions = {}): Exten
 			presenter.clear()
 			unregisterGeneral?.()
 			unregisterGeneral = undefined
+			unregisterLocationChange?.()
+			unregisterLocationChange = undefined
 		})
 	}
 }

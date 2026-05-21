@@ -6,14 +6,9 @@ import {
 	writeHideSessionModeDialog,
 	writeSessionModeWizardSeenAt,
 } from "../../config.js"
-import { registerTipProvider } from "../tips/registry.js"
+import { setTipWidgetLocation } from "../tips/index.js"
 import { setSessionModeOnboardingFooterSuppressed } from "../ui.js"
-import {
-	SessionModePickerComponent,
-	type SessionModePickerResult,
-	keyToSessionModePickerEvent,
-} from "./session-mode-picker.js"
-import { createSessionModeTipProvider } from "./session-mode-tips.js"
+import { SessionModePickerComponent, type SessionModePickerResult } from "./session-mode-picker.js"
 
 export type SessionModeOnboardingAction = "show" | "skip" | "skip-and-mark-seen"
 
@@ -65,25 +60,13 @@ export interface SessionModeOnboardingExtensionOptions {
 	) => void | Promise<void>
 }
 
-export const SESSION_MODE_WIDGET_KEY = "kimchi-session-mode-onboarding"
-const SESSION_MODE_WIDGET_OPTIONS = { placement: "aboveEditor" } as const
-
 export default function sessionModeOnboardingExtension(options: SessionModeOnboardingExtensionOptions) {
 	return (pi: ExtensionAPI) => {
 		let cleanupActiveWizard: (() => void) | undefined
-		let pickerVisible = false
-		let unregisterSessionModeTips: (() => void) | undefined
-
-		const clearSessionModeTips = () => {
-			pickerVisible = false
-			unregisterSessionModeTips?.()
-			unregisterSessionModeTips = undefined
-		}
 
 		pi.on("session_start", (event, ctx) => {
 			cleanupActiveWizard?.()
 			cleanupActiveWizard = undefined
-			clearSessionModeTips()
 			const seenAt = readSessionModeWizardSeenAt(options.configPath)
 			const decision = decideSessionModeOnboarding({
 				launchContext: options.launchContext,
@@ -108,11 +91,8 @@ export default function sessionModeOnboardingExtension(options: SessionModeOnboa
 						)
 					}
 				}
-				pickerVisible = true
-				unregisterSessionModeTips = registerTipProvider(createSessionModeTipProvider(() => pickerVisible))
 				cleanupActiveWizard = showSessionModeWizard(pi, ctx, options, showHideOption, () => {
 					cleanupActiveWizard = undefined
-					clearSessionModeTips()
 				})
 			}
 		})
@@ -120,7 +100,6 @@ export default function sessionModeOnboardingExtension(options: SessionModeOnboa
 		pi.on("session_shutdown", () => {
 			cleanupActiveWizard?.()
 			cleanupActiveWizard = undefined
-			clearSessionModeTips()
 		})
 	}
 }
@@ -133,13 +112,13 @@ function showSessionModeWizard(
 	onCleanup: () => void,
 ): () => void {
 	let finished = false
-	let unsubscribeInput: (() => void) | undefined
-	let component: SessionModePickerComponent | undefined
+	let closePicker: ((result: SessionModePickerResult) => void) | undefined
+	let restoreTips: (() => void) | undefined
+	let cancelBeforePickerReady = false
 
 	const cleanup = () => {
-		unsubscribeInput?.()
-		unsubscribeInput = undefined
-		ctx.ui.setWidget(SESSION_MODE_WIDGET_KEY, undefined, SESSION_MODE_WIDGET_OPTIONS)
+		restoreTips?.()
+		restoreTips = undefined
 		setSessionModeOnboardingFooterSuppressed(false)
 		onCleanup()
 	}
@@ -165,46 +144,48 @@ function showSessionModeWizard(
 		}
 		cleanup()
 		if (result !== "cancelled" && options.onOutcome) {
-			Promise.resolve(options.onOutcome(result.choice, ctx, pi)).catch((err: unknown) => {
-				ctx.ui.notify(`Session mode startup failed: ${err instanceof Error ? err.message : String(err)}`, "warning")
-			})
+			Promise.resolve()
+				.then(() => options.onOutcome?.(result.choice, ctx, pi))
+				.catch((err: unknown) => {
+					ctx.ui.notify(`Session mode startup failed: ${err instanceof Error ? err.message : String(err)}`, "warning")
+				})
 		}
 	}
 
-	setSessionModeOnboardingFooterSuppressed(true)
-	interface TuiWithOverlay {
-		hasOverlay(): boolean
+	const fail = (err: unknown) => {
+		if (finished) return
+		finished = true
+		cleanup()
+		ctx.ui.notify(`Session mode picker failed: ${err instanceof Error ? err.message : String(err)}`, "warning")
 	}
-	let tuiRef: TuiWithOverlay | null = null
-	ctx.ui.setWidget(
-		SESSION_MODE_WIDGET_KEY,
-		(tui, theme) => {
-			tuiRef = tui as unknown as TuiWithOverlay
-			component = new SessionModePickerComponent(theme, finish, () => tui.requestRender(), {
-				showHideCheckbox: showHideOption,
-			})
-			return component
-		},
-		SESSION_MODE_WIDGET_OPTIONS,
-	)
-	unsubscribeInput = ctx.ui.onTerminalInput((data) => {
-		// When an overlay is visible (e.g. keyboard warning), let it receive
-		// input instead of the widget. Overlays are modal and should take
-		// precedence over background widgets.
-		if (typeof tuiRef?.hasOverlay === "function" && tuiRef.hasOverlay()) {
-			return undefined
-		}
-		const event = keyToSessionModePickerEvent(data)
-		if (event) {
-			component?.handleInput(data)
-			return { consume: true }
-		}
-		return undefined
-	})
+
+	restoreTips = setTipWidgetLocation("hidden")
+	setSessionModeOnboardingFooterSuppressed(true)
+	try {
+		ctx.ui
+			.custom<SessionModePickerResult>(
+				(tui, theme, _keybindings, done) => {
+					closePicker = done
+					if (cancelBeforePickerReady || finished) {
+						done("cancelled")
+					}
+					return new SessionModePickerComponent(theme, done, () => tui.requestRender(), {
+						showHideCheckbox: showHideOption,
+					})
+				},
+				{ overlay: false },
+			)
+			.then(finish)
+			.catch(fail)
+	} catch (err) {
+		fail(err)
+	}
 
 	return () => {
 		if (finished) return
 		finished = true
+		if (!closePicker) cancelBeforePickerReady = true
+		closePicker?.("cancelled")
 		cleanup()
 	}
 }
