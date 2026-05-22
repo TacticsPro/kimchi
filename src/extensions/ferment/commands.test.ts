@@ -11,6 +11,7 @@ import {
 	registerFermentCommands,
 	startInteractiveFerment,
 } from "./commands.js"
+import { clearAllPendingPlanReviews, getPendingPlanReview, setPendingPlanReview } from "./plan-review.js"
 import { type FermentRuntime, createDefaultFermentRuntime } from "./runtime.js"
 import { createApplyAndPersist } from "./tool-helpers.js"
 
@@ -47,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
 	writeFileSyncMock.mockReset()
 	writeFileSyncMock.mockImplementation(actualFs.writeFileSync)
+	clearAllPendingPlanReviews()
 })
 
 interface RegisteredCommand {
@@ -318,6 +320,39 @@ describe("registerFermentCommands", () => {
 			}),
 		)
 		expect(getFermentArgumentCompletions("resume ", h.runtime)).toBeNull()
+	})
+
+	it("/ferment switch clears only the previous active pending plan review", async () => {
+		const h = createHarness()
+		const previous = h.storage.create("Previous Review")
+		const target = h.storage.create("Target Review")
+		h.runtime.setActive(previous)
+		setPendingPlanReview({
+			fermentId: previous.id,
+			fermentName: previous.name,
+			planMarkdown: "# Plan: Previous Review",
+		})
+		setPendingPlanReview({
+			fermentId: target.id,
+			fermentName: target.name,
+			planMarkdown: "# Plan: Target Review",
+		})
+
+		const commands = new Map<string, RegisteredCommand>()
+		const pi = {
+			...h.pi,
+			registerCommand: (name: string, command: RegisteredCommand) => {
+				commands.set(name, command)
+			},
+		} as unknown as ExtensionAPI
+		registerFermentCommands(pi, h.runtime)
+
+		const fermentCommand = commands.get("ferment")
+		if (!fermentCommand) throw new Error("ferment command was not registered")
+		await fermentCommand.handler(`switch "${target.name}"`, h.ctx)
+
+		expect(getPendingPlanReview(previous.id)).toBeUndefined()
+		expect(getPendingPlanReview(target.id)).toBeDefined()
 	})
 
 	it("completes /ferment nested static argument groups", () => {
@@ -631,9 +666,7 @@ describe("registerFermentCommands", () => {
 		expect(h.pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: "ferment_continuation_nudge",
-				content: [
-					expect.objectContaining({ text: expect.stringContaining("Re-read the current persisted ferment state") }),
-				],
+				content: [expect.objectContaining({ text: expect.stringContaining("Call start_ferment_step") })],
 				details: expect.objectContaining({ action: "wake_up", expectedAction: "start_step" }),
 			}),
 			{ triggerTurn: true },
@@ -694,9 +727,7 @@ describe("registerFermentCommands", () => {
 		expect(h.pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: "ferment_continuation_nudge",
-				content: [
-					expect.objectContaining({ text: expect.stringContaining("Re-read the current persisted ferment state") }),
-				],
+				content: [expect.objectContaining({ text: expect.stringContaining("Call activate_ferment_phase") })],
 				details: expect.objectContaining({ action: "wake_up", expectedAction: "activate_phase" }),
 			}),
 			{ triggerTurn: true },
@@ -865,9 +896,7 @@ describe("registerFermentCommands", () => {
 		expect(h.pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: "ferment_continuation_nudge",
-				content: [
-					expect.objectContaining({ text: expect.stringContaining("Re-read the current persisted ferment state") }),
-				],
+				content: [expect.objectContaining({ text: expect.stringContaining("Call start_ferment_step") })],
 				details: expect.objectContaining({ action: "wake_up", expectedAction: "start_step" }),
 			}),
 			{ triggerTurn: true },
@@ -918,9 +947,7 @@ describe("registerFermentCommands", () => {
 		expect(h.pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: "ferment_continuation_nudge",
-				content: [
-					expect.objectContaining({ text: expect.stringContaining("Re-read the current persisted ferment state") }),
-				],
+				content: [expect.objectContaining({ text: expect.stringContaining("Call start_ferment_step") })],
 				details: expect.objectContaining({ action: "wake_up", expectedAction: "start_step" }),
 			}),
 			{ triggerTurn: true },
@@ -1047,9 +1074,7 @@ describe("registerFermentCommands", () => {
 		expect(h.pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: "ferment_continuation_nudge",
-				content: [
-					expect.objectContaining({ text: expect.stringContaining("Re-read the current persisted ferment state") }),
-				],
+				content: [expect.objectContaining({ text: expect.stringContaining("Call activate_ferment_phase") })],
 				details: expect.objectContaining({ action: "wake_up", expectedAction: "activate_phase" }),
 			}),
 			{ triggerTurn: true },

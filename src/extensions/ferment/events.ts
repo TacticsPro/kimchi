@@ -247,6 +247,7 @@ export function registerFermentEvents(pi: ExtensionAPI, runtime: FermentRuntime 
 		runtime.clearAllStepStarts()
 		runtime.clearAllScopingGates()
 		runtime.clearAllPendingScopes()
+		runtime.clearAllPendingPlanReviews()
 		clearFermentCache()
 
 		const envId = process.env.KIMCHI_ACTIVE_FERMENT
@@ -302,6 +303,7 @@ export function registerFermentEvents(pi: ExtensionAPI, runtime: FermentRuntime 
 
 	pi.on("session_shutdown", async () => {
 		if (isAgentWorker()) return
+		runtime.clearAllPendingPlanReviews()
 		const f = runtime.getActive()
 		if (!f) return
 		if (f.status === "running" || f.status === "planned") {

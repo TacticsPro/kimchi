@@ -341,7 +341,7 @@ function validateScopingQuestions(questions: ScopingQuestion[]): string | null {
 	return null
 }
 
-function buildPlanEntry(fermentName: string, params: NormalizedProposeScopingArgs): string {
+export function buildPlanMarkdown(fermentName: string, params: NormalizedProposeScopingArgs): string {
 	const phaseBlocks = params.phases.map((p, i) => {
 		const goalLines = wrapText(p.goal, 86)
 		const stepLines = (p.steps ?? []).map((s, j) => renderStep(j + 1, s.description)).join("\n")
@@ -353,8 +353,7 @@ function buildPlanEntry(fermentName: string, params: NormalizedProposeScopingArg
 			.filter(Boolean)
 			.join("\n")
 	})
-	const divider = pr_dim("╌".repeat(72))
-	const planBody = [
+	return [
 		`# Plan: ${fermentName}`,
 		"",
 		renderWrapped("## Goal", params.goal),
@@ -368,8 +367,6 @@ function buildPlanEntry(fermentName: string, params: NormalizedProposeScopingArg
 		"## Phases",
 		phaseBlocks.join("\n\n"),
 	].join("\n")
-
-	return [pr_bold("Ready to execute?"), "Here is the proposed plan:", divider, planBody, divider].join("\n")
 }
 
 function buildAnswersEntry(questions: ScopingQuestion[], answers: ScopingAnswer[]): string {
@@ -388,6 +385,21 @@ function buildScopingIterationMessage(questions: ScopingQuestion[], answers: Sco
 		return `- "${q.text}" → ${answerText}`
 	})
 	return `The user reviewed your draft and chose these answers (which OVERRIDE your recommendations):\n${bundledAnswerLines.join("\n")}\n\nRe-emit propose_ferment_scoping ONCE with updated goal/criteria/constraints/assumptions/phases reflecting these answers. Usually emit \`questions: []\` so the user can review the final plan. You may emit new questions only if these answers reveal a genuinely new, decision-blocking ambiguity; never repeat or rephrase any question answered above. Do NOT ask questions in chat — call the tool directly.`
+}
+
+function escapeXmlText(value: string): string {
+	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+}
+
+export function buildFreeformScopingFeedbackMessage(fermentId: string, userText: string): string {
+	return [
+		`User reviewed the pending plan for ferment_id "${fermentId}" and provided this feedback:`,
+		"<user_feedback>",
+		escapeXmlText(userText),
+		"</user_feedback>",
+		"",
+		"Re-run propose_ferment_scoping for this same ferment_id, incorporating this direction. Do not call scope_ferment.",
+	].join("\n")
 }
 
 export async function scopeFerment(
@@ -707,17 +719,15 @@ ${renderGateGuidance("scope_ferment")}`,
 				proposeIterations: nextIterations,
 			})
 
-			// 4. Build the persistent plan entry. We only emit it at the real
-			// decision point: immediately for zero-question drafts, or after the
-			// user accepts recommendations. If the user changes answers, the
-			// agent re-drafts first so we never show a stale plan as final.
-			const planEntry = buildPlanEntry(ferment.name, params)
+			// 4. Build clean markdown for final/headless tool output and local review UI.
+			const planEntry = buildPlanMarkdown(ferment.name, params)
 			const formatPlanEntry = (suffix?: string): string => (suffix ? `${planEntry}\n\n${suffix}` : planEntry)
 			const planToolOk = (message: string, options: { includePlan?: boolean; suffix?: string } = {}) =>
 				toolOk(options.includePlan ? `${formatPlanEntry(options.suffix)}\n\n${message}` : message)
+			const promptUi = getPromptUi(ctx)
 
 			// 5. Headless path.
-			if (!getPromptUi(ctx)?.select) {
+			if (!promptUi?.select && !promptUi?.custom) {
 				if (questions.length === 0) {
 					const scopeOutcome = confirmPendingScope(
 						runtime,
@@ -742,18 +752,12 @@ ${renderGateGuidance("scope_ferment")}`,
 				)
 			}
 
-			// 6. Zero-questions path: plan is already in chat scrollback above.
-			// The dropdown just asks for the decision.
+			// 6. Zero-questions path: defer the local review dialog until the
+			// agent turn ends, so terminal scrollback is not fighting active-turn
+			// progress writes.
 			if (questions.length === 0) {
-				const startLabel = "Start execution  ✓"
-				const selected = await promptSelect(ctx, `${formatPlanEntry()}\n\nProceed with this plan?`, [
-					startLabel,
-					"Let me say something",
-				])
-				if (selected === undefined) {
-					return planToolOk("No changes made. Waiting for your next instruction.")
-				}
-				if (selected === startLabel) {
+				if (!promptUi?.custom) {
+					// Some hosts expose select/input without custom components; keep them on the pre-review confirmation path.
 					const scopeOutcome = confirmPendingScope(
 						runtime,
 						params.ferment_id,
@@ -771,17 +775,14 @@ ${renderGateGuidance("scope_ferment")}`,
 						{ includePlan: true },
 					)
 				}
-				// "Let me say something"
-				const userText = await promptInput(ctx, "Your direction:", "")
-				if (!userText) {
-					return planToolOk("No changes made. Waiting for your next instruction.")
-				}
-				const sayMoreContent = `User said: ${userText}. Re-run propose_ferment_scoping incorporating this direction.`
-				void pi.sendMessage(
-					{ content: sayMoreContent, customType: "ferment_scoping_iteration", display: false },
-					{ triggerTurn: true },
-				)
-				return planToolOk("Got it. Updating the plan with your direction...")
+
+				runtime.setPendingPlanReview({
+					fermentId: params.ferment_id,
+					fermentName: ferment.name,
+					title: params.title,
+					planMarkdown: planEntry,
+				})
+				return planToolOk("Plan ready for review. The review dialog will open when this turn finishes.")
 			}
 
 			// 7. Tabbed question form + review loop.
@@ -916,7 +917,7 @@ ${renderGateGuidance("scope_ferment")}`,
 					if (!userText) {
 						return planToolOk(`${answersEntry}\n\nNo changes made. Waiting for your next instruction.`)
 					}
-					const sayMoreContent = `User said: ${userText}. Re-run propose_ferment_scoping incorporating this direction.`
+					const sayMoreContent = buildFreeformScopingFeedbackMessage(params.ferment_id, userText)
 					void pi.sendMessage(
 						{ content: sayMoreContent, customType: "ferment_scoping_iteration", display: false },
 						{ triggerTurn: true },
