@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto"
 import { dirname } from "node:path"
 import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent"
+import { readGitToken, writeGitToken } from "../../../config.js"
 import { authenticateRemoteSession, listRemoteSessions, waitForSessionReady } from "../api/index.js"
 import type { AuthenticateResponse } from "../api/types.js"
+import { getGitRemoteHost } from "../git-credentials.js"
 import type { RemoteAgentSession } from "../proxy/agent-session.js"
 import { buildRemoteAgentSession } from "../proxy/builder.js"
 import { BASE_EXCLUDE_GLOBS, RsyncError, runRsync } from "../sync/rsync.js"
 import { exportSessionForTeleport } from "../sync/session-export.js"
+import { promptForGitToken } from "../ui/git-token-prompt.js"
 import { createTeleportProgress } from "../ui/progress.js"
 import type { TeleportArgs } from "./args.js"
 import { TeleportRefusal, info, refuse, status, warn } from "./errors.js"
@@ -16,6 +19,9 @@ import {
 	estimateWorkspaceBytes,
 	gitWorkingTreeDirty,
 	isBusy,
+	propagateGitConfigToSandbox,
+	propagateGitCredentialToSandbox,
+	readLocalGitConfig,
 	rsyncInstallHint,
 	waitUntilIdle,
 	whichRsync,
@@ -48,7 +54,7 @@ async function refreshUIAfterSwap(ctx: TeleportContext): Promise<void> {
 	await rebindAfterSwap(ctx)
 }
 
-export async function runTeleport(args: TeleportArgs, ctx: TeleportContext): Promise<void> {
+export async function runTeleport(args: TeleportArgs, ctx: TeleportContext): Promise<{ host: string }> {
 	const wrapper = ctx.wrapper
 	const homeBase = wrapper.homeBase as AgentSession
 
@@ -95,7 +101,34 @@ export async function runTeleport(args: TeleportArgs, ctx: TeleportContext): Pro
 		warn(ctx, `Workspace is ${mb} MB — sync may take a while.`)
 	}
 
-	// ── 2. Progress widget ──
+	// ── 2. Git credentials resolution ──
+	let gitToken: string | undefined
+	const gitHost = await getGitRemoteHost(ctx.cwd)
+	if (!args.noGitToken) {
+		if (gitHost) {
+			// Check if we already have a stored token for this host
+			gitToken = readGitToken(gitHost, ctx.configPath)
+			if (gitToken) {
+				info(ctx, `Using saved git token for ${gitHost}`)
+			} else {
+				// Show TUI prompt for the user to paste a token
+				const promptResult = await promptForGitToken(gitHost, ctx.ui)
+				if (promptResult.outcome === "submitted") {
+					gitToken = promptResult.token
+					if (promptResult.save) {
+						try {
+							writeGitToken(gitHost, promptResult.token, ctx.configPath)
+						} catch (err) {
+							warn(ctx, `Could not save git token: ${err instanceof Error ? err.message : String(err)}`)
+						}
+					}
+				}
+				// outcome === "skipped" → gitToken stays undefined, proceed without
+			}
+		}
+	}
+
+	// ── 3. Progress widget ──
 	const progress = createTeleportProgress(ctx.ui)
 
 	try {
@@ -200,6 +233,48 @@ export async function runTeleport(args: TeleportArgs, ctx: TeleportContext): Pro
 			}
 		}
 
+		// ── Git identity & credentials propagation ──
+		const localGitConfig = await readLocalGitConfig(ctx.cwd)
+		if (localGitConfig.name || localGitConfig.email) {
+			progress.step("Setting git identity")
+			try {
+				await propagateGitConfigToSandbox({
+					remoteHost: authResult.host,
+					remoteUser: SANDBOX_USER,
+					authToken: authResult.connectToken,
+					gitName: localGitConfig.name,
+					gitEmail: localGitConfig.email,
+					signal: ctx.signal,
+				})
+				progress.complete("Git identity set")
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err)
+				warn(ctx, `Could not set git identity on sandbox: ${msg}`)
+				progress.complete("Git identity skipped")
+			}
+		} else {
+		}
+		if (gitHost && gitToken) {
+			progress.step("Configuring git credentials")
+			try {
+				await propagateGitCredentialToSandbox({
+					remoteHost: authResult.host,
+					remoteUser: SANDBOX_USER,
+					authToken: authResult.connectToken,
+					gitHost,
+					gitToken,
+					signal: ctx.signal,
+				})
+				wrapper.markGitCredentialsSynced(sessionId)
+				progress.complete("Git credentials configured")
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err)
+				warn(ctx, `Could not configure git credentials on sandbox: ${msg}`)
+				progress.complete("Git credentials skipped")
+			}
+		} else {
+		}
+
 		progress.step("Connecting")
 		let remote: RemoteAgentSession
 		try {
@@ -242,6 +317,7 @@ export async function runTeleport(args: TeleportArgs, ctx: TeleportContext): Pro
 		await refreshUIAfterSwap(ctx)
 
 		progress.finish({ id: sessionId, url: authResult.wsUrl, description: authResult.description })
+		return { host: authResult.host }
 	} finally {
 		progress.stop()
 		status(ctx, undefined)
