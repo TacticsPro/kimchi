@@ -21,6 +21,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { determineNextAction } from "../../ferment/engine.js"
 import type { ScopePhaseInput } from "../../ferment/state-machine.js"
 import type { Ferment } from "../../ferment/types.js"
+import { SCOPING_DISCOVERY_GUIDANCE } from "./constants.js"
 import { promptInput } from "./prompt-ui.js"
 import { type FermentRuntime, defaultFermentRuntime } from "./runtime.js"
 import type { FermentUiContext } from "./ui.js"
@@ -169,7 +170,34 @@ export async function runScopingFlow(
 			content: [
 				{
 					type: "text",
-					text: `User wants to ferment "${f.name}" (ferment_id "${f.id}"): ${intent}\n\nThe host has already created this draft ferment. Draft a complete Scoping (goal, success_criteria, constraints, assumptions) AND 1-7 phases. Ask clarifying questions ONLY for decision-blocking uncertainty where the answer materially changes architecture, dependencies, data model, user-facing scope, security posture, deployment/runtime assumptions, or verification strategy. Do not ask preference-survey questions when there is a safe, reversible default; record the default in assumptions instead. If the user asks to be thorough with questions, be thorough in the plan fields and verification steps; do not ask generic default-choice questions unless implementation is blocked. For simple greenfield apps like a TODO app, assume a static browser app, vanilla JS unless repo context points elsewhere, localStorage persistence, and basic MVP scope unless the user requested more. Default to one phase for simple tasks. Add phases only for real vertical slices/tracer bullets, materially different complexity/risk tiers, independent parallel workstreams, or distinct code localities. Do not split phases just for setup, directory creation, CRUD vs polish, or to make the plan look organized. Call propose_ferment_scoping with ferment_id "${f.id}" and everything. Don't research with file/bash tools first.`,
+					text: `Task:
+Draft a complete Ferment scoping proposal.
+
+Context:
+- User wants to ferment "${f.name}".
+- ferment_id: "${f.id}"
+- User intent: ${intent}
+- The host has already created this draft ferment. Do NOT call create_ferment.
+
+${SCOPING_DISCOVERY_GUIDANCE}
+
+Question policy:
+- Ask clarifying questions ONLY for decision-blocking uncertainty where the answer materially changes architecture, dependencies, data model, user-facing scope, security posture, deployment/runtime assumptions, or verification strategy.
+- In interactive Ferment scoping, ask those questions through the propose_ferment_scoping questions array, not in chat. The host renders them as dropdowns.
+- Do not call propose_ferment_scoping first and then ask follow-up questions in prose. If questions are needed, include them in the same propose_ferment_scoping call.
+- If no question is truly decision-blocking, emit questions: [] and record safe defaults in assumptions.
+- Do not ask preference-survey questions when there is a safe, reversible default; record the default in assumptions instead.
+- If the user asks to be thorough with questions, be thorough in the plan fields and verification steps; do not ask generic default-choice questions unless implementation is blocked.
+
+Planning policy:
+- For simple greenfield apps like a TODO app, assume a static browser app, vanilla JS unless repo context points elsewhere, localStorage persistence, and basic MVP scope unless the user requested more.
+- Default to one phase for simple tasks.
+- Add phases only for real vertical slices/tracer bullets, materially different complexity/risk tiers, independent parallel workstreams, or distinct code localities.
+- Do not split phases just for setup, directory creation, CRUD vs polish, or to make the plan look organized.
+
+Output contract:
+Call propose_ferment_scoping with ferment_id "${f.id}" and a complete payload: goal, success_criteria, constraints, assumptions, 1-7 phases, questions, and gates. Do not ask scoping questions in chat; questions must be in propose_ferment_scoping.questions, or questions: [] when no decision-blocking question remains.
+The gates array is required and must contain exactly P1, P2, and P3. Every gate object must include id, verdict, rationale, and evidence. Never emit a partial gates array, never omit rationale or evidence, and never include only P1. If a validation error happens, retry with the full payload again, including questions and all three gates.`,
 				},
 			],
 			display: false,
