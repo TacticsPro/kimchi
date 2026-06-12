@@ -51,19 +51,26 @@ exists.
 
 7.  Patch scripts/build-binary.js
 
-Original: if (!isCI) { run(“build proxy-helper”, “make -C
-tools/proxy-helper build”) }
+Original:
+if (!isCI) {
+	run("build proxy-helper", "make -C tools/proxy-helper build")
+}
 
-Replace with: if (!isCI) { if (platform() === “win32”) {
-console.log(“Using existing proxy-helper.exe”) } else { run(“build
-proxy-helper”, “make -C tools/proxy-helper build”) } }
+Replace with: 
+if (!isCI) {
+    if (platform() === "win32") {
+        console.log("Using existing proxy-helper.exe")
+    } else {
+        run("build proxy-helper", "make -C tools/proxy-helper build")
+    }
+}
 
 8.  Patch package.json
 
-Original: “clean”: “rm -rf dist”
+Original: "clean": "rm -rf dist"
 
-Replace with: “clean”: “node -e
-"require(‘fs’).rmSync(‘dist’,{recursive:true,force:true})"”
+Replace with:
+"clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
 
 9.  Build Windows Binary
 
