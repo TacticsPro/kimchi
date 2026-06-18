@@ -97,19 +97,6 @@ function buildPausedWarning(f: Ferment): string {
 	return `\n\n## Ferment Paused\n\nFerment "${f.name}" is paused by the user. Do NOT call any ferment tools (activate_ferment_phase, start_ferment_step, complete_ferment_step, etc.) — they will be rejected. Acknowledge any pending question briefly and wait for the user to resume with /ferment resume.`
 }
 
-const IDLE_FERMENT_HINT = `## Ferment Workflow (optional)
-
-Ferment is a host-owned plan → build → review workflow. Start it only with \`request_ferment_workflow\`; never create or edit \`.kimchi/\` files yourself. The tool asks the user for explicit host confirmation before creating the workflow. In yolo permissions mode, the host auto-approves.
-
-Before exploration, classify the user's text only:
-- Clear small task: handle inline.
-- Substantive, multi-step, broad discovery, or explicit ferment/planning request: call \`request_ferment_workflow\` first.
-- Vague non-ferment request: ask only decision-blocking clarification, then act inline.
-Do not call \`set_phase\` or discovery tools *until* you have classified the request and either called \`request_ferment_workflow\`, chosen inline work, or asked necessary non-ferment clarification.
-Treat open-ended analysis of an existing app as substantive: request the ferment workflow before analysis, file reads, or phase tagging.
-
-Call \`request_ferment_workflow\` with a concise \`title\` and an \`intent\` containing the full original user request, then stop; the host handles confirmation and queues scoping. If the user declines, continue inline. Never block on this.`
-
 /**
  * Renders the ferment-specific system-prompt block. Registered as a
  * `SystemPromptBlock` from index.ts and assembled into the system prompt by
@@ -122,9 +109,8 @@ Call \`request_ferment_workflow\` with a concise \`title\` and an \`intent\` con
  * - flag set: draft state still gets the planner supplement because the
  *   ferment-oneshot planner must scope autonomously from the bootstrap turn.
  *
- * Returns `undefined` only for terminal/draft states that already have their
- * own flow; idle (no ferment) renders a soft, optional hint that nudges the
- * agent to ask the user before starting substantial work, never to block.
+ * Returns `undefined` for terminal/draft states that already have their own
+ * flow. Idle sessions stay Ferment-free.
  */
 export function buildFermentPromptBlock(
 	ctx: ExtensionContext,
@@ -140,7 +126,7 @@ export function buildFermentPromptBlock(
 	if (getPermissionMode(sessionId)?.mode === "plan") return undefined
 
 	const f = runtime.getActive()
-	if (!f) return IDLE_FERMENT_HINT
+	if (!f) return undefined
 
 	const oneshot = pi.getFlag("ferment-oneshot") === true
 

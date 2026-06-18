@@ -115,15 +115,9 @@ describe("buildFermentPromptBlock", () => {
 			})
 		}
 
-		it("returns idle hint when no ferment is active", () => {
+		it("does not inject the idle hint when no ferment is active", () => {
 			const out = buildFermentPromptBlock(makeMockCtx(), PI_NORMAL, makeNoActiveFermentRuntime())
-			expect(out).toContain("Ferment Workflow")
-			expect(out).toContain("The tool asks the user for explicit host confirmation")
-			expect(out).toContain("In yolo permissions mode, the host auto-approves")
-			expect(out).not.toContain("questionnaire")
-			expect(out).not.toContain("ferment_start_approval")
-			expect(out).toContain("`intent` containing the full original user request")
-			expect(out).toContain("Never block")
+			expect(out).toBeUndefined()
 		})
 	})
 
@@ -320,17 +314,6 @@ describe("buildFermentPromptBlock", () => {
 			expect(out).not.toContain("kimi-k2.5")
 			expect(out).not.toContain("worker_model")
 		})
-
-		it("keeps phase tagging out of the pre-ferment classification path", () => {
-			const out = buildFermentPromptBlock(makeMockCtx(), PI_NORMAL, makeNoActiveFermentRuntime()) ?? ""
-			expect(out).toContain("Do not call `set_phase`")
-			expect(out).toContain("*until* you have classified the request")
-			expect(out).toContain("called `request_ferment_workflow`")
-			expect(out).toContain("open-ended analysis of an existing app")
-			expect(out).toContain("request the ferment workflow before analysis, file reads, or phase tagging")
-			expect(out).toContain("the host handles confirmation and queues scoping")
-		})
-
 		// Regression: the scope_ferment rule must differ between interactive and one-shot.
 		it("tells interactive planners to avoid scope_ferment and use propose_ferment_scoping", () => {
 			const out = buildFermentPromptBlock(makeMockCtx(), PI_NORMAL, makeRuntime({ status: "running" })) ?? ""
