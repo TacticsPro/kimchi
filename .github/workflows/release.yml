@@ -53,6 +53,10 @@ jobs:
             os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
+          - target: bun-windows-x64
+            os: windows
+            arch: amd64
+            runner: windows-latest
 
     runs-on: ${{ matrix.runner }}
 
@@ -73,13 +77,13 @@ jobs:
           go-version-file: tools/proxy-helper/go.mod
 
       - name: Build proxy-helper
-        run: make build
-        working-directory: tools/proxy-helper
+        run: node scripts/build-proxy-helper.js --target ${{ matrix.target }}
 
       - name: Build binary
         run: pnpm run build:binary
 
       - name: Verify binary architecture
+        if: ${{ matrix.os != 'windows' }}
         run: |
           file dist/bin/kimchi
           case "${{ matrix.arch }}" in
@@ -95,7 +99,31 @@ jobs:
             *) echo "Unsupported arch: ${{ matrix.arch }}" >&2; exit 1 ;;
           esac
 
+      - name: Verify Windows binary
+        if: ${{ matrix.os == 'windows' }}
+        shell: pwsh
+        run: |
+          Get-Item dist/bin/kimchi.exe
+          Get-Item dist/share/kimchi/bin/proxy-helper.exe
+
+          .\dist\bin\kimchi.exe --version
+          .\dist\bin\kimchi.exe --help | Select-Object -First 20
+          .\dist\share\kimchi\bin\proxy-helper.exe ssh-proxy --help | Select-Object -First 20
+
+          $env:KIMCHI_API_KEY = "dummy"
+          $env:KIMCHI_REMOTE_ENDPOINT = "http://127.0.0.1:9"
+          $output = & .\dist\bin\kimchi.exe --ssh-proxy dummy-session 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Write-Output
+          if ($exitCode -eq 0) {
+            throw "Expected dummy --ssh-proxy check to fail before connecting to a real API"
+          }
+          if ($output -match "proxy-helper binary not found") {
+            throw "Windows kimchi.exe could not locate the bundled proxy-helper.exe"
+          }
+
       - name: Package binary
+        shell: bash
         run: tar -czf kimchi_${{ matrix.os }}_${{ matrix.arch }}.tar.gz -C dist bin share
 
       - name: Upload artifact
