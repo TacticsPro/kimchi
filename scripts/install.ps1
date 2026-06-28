@@ -11,7 +11,7 @@
 #   KIMCHI_VERSION         Pin a specific version tag (e.g. v0.2.0). Defaults
 #                          to "latest".
 #   KIMCHI_REPO_OVERRIDE   Override release repo. Defaults to getkimchi/kimchi.
-#   KIMCHI_ARCHIVE_PATH    Use a local kimchi_windows_amd64.tar.gz archive
+#   KIMCHI_ARCHIVE_PATH    Use a local kimchi_windows_amd64.zip archive
 #                          instead of downloading. Intended for CI/dev.
 #   KIMCHI_SKIP_PATH_UPDATE  Set to 1 to skip user PATH updates.
 
@@ -88,15 +88,11 @@ function Invoke-DownloadFile {
 function Expand-KimchiArchive {
   param([string]$ArchivePath, [string]$Destination)
 
-  $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-  if (-not $tar) {
-    throw "tar.exe was not found. Modern Windows includes tar.exe; install it or extract $ArchivePath manually."
-  }
-
   New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-  & $tar.Source -xzf $ArchivePath -C $Destination
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to extract $ArchivePath with tar.exe."
+  try {
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $Destination -Force
+  } catch {
+    throw "Failed to extract $ArchivePath with Expand-Archive: $($_.Exception.Message)"
   }
 }
 
@@ -168,7 +164,7 @@ function Install-Kimchi {
   $version = Get-EnvOrDefault "KIMCHI_VERSION" "latest"
   $installRoot = Get-EnvOrDefault "KIMCHI_INSTALL_DIR" (Get-DefaultInstallRoot)
   $arch = Get-WindowsArch
-  $assetName = "kimchi_windows_${arch}.tar.gz"
+  $assetName = "kimchi_windows_${arch}.zip"
   $tmpDir = Join-Path ([IO.Path]::GetTempPath()) "kimchi-installer-$PID"
   $extractDir = Join-Path $tmpDir "extract"
 

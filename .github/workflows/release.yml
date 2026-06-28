@@ -131,15 +131,14 @@ jobs:
             throw "Windows kimchi.exe could not locate the bundled proxy-helper.exe"
           }
 
-      - name: Package binary
-        shell: bash
-        run: tar -czf kimchi_${{ matrix.os }}_${{ matrix.arch }}.tar.gz -C dist bin share
+      - name: Package release asset
+        run: node scripts/package-release-asset.js --os ${{ matrix.os }} --arch ${{ matrix.arch }}
 
       - name: Verify Windows installer
         if: ${{ matrix.os == 'windows' }}
         shell: pwsh
         env:
-          KIMCHI_ARCHIVE_PATH: kimchi_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+          KIMCHI_ARCHIVE_PATH: kimchi_${{ matrix.os }}_${{ matrix.arch }}.zip
           KIMCHI_INSTALL_DIR: ${{ runner.temp }}\kimchi-install
           KIMCHI_SKIP_PATH_UPDATE: "1"
         run: |
@@ -150,7 +149,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kimchi_${{ matrix.os }}_${{ matrix.arch }}
-          path: kimchi_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+          path: kimchi_${{ matrix.os }}_${{ matrix.arch }}.*
 
   smoke-test:
     needs: [build]
@@ -195,13 +194,14 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum kimchi_*.tar.gz > checksums.txt
+          sha256sum kimchi_*.tar.gz kimchi_*.zip > checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           files: |
             artifacts/kimchi_*.tar.gz
+            artifacts/kimchi_*.zip
             artifacts/checksums.txt
             scripts/install.sh
             scripts/install.ps1

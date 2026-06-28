@@ -12,7 +12,7 @@ Install the latest native Windows release from PowerShell:
 irm https://github.com/getkimchi/kimchi/releases/latest/download/install.ps1 | iex
 ```
 
-The installer downloads `kimchi_windows_amd64.tar.gz`, installs
+The installer downloads `kimchi_windows_amd64.zip`, installs
 `kimchi.exe` under `%LOCALAPPDATA%\Kimchi\bin`, stages shared runtime files
 under `%LOCALAPPDATA%\Kimchi\share\kimchi`, and adds the `bin` directory to
 the user `PATH`.
@@ -68,13 +68,13 @@ The Windows build job does the same packaging work as Linux/macOS:
    helper. The dummy endpoint is expected to fail at connection time; it must
    not fail with `proxy-helper binary not found`.
 
-9. Package `kimchi_windows_amd64.tar.gz` and verify `scripts/install.ps1`
+9. Package `kimchi_windows_amd64.zip` and verify `scripts/install.ps1`
    against that local archive.
 
 10. Upload:
 
    ```text
-   kimchi_windows_amd64.tar.gz
+   kimchi_windows_amd64.zip
    ```
 
 The artifact layout is:
@@ -166,7 +166,7 @@ ssh -p 2222 Administrator@127.0.0.1
 Copy a packaged artifact into Windows and extract it:
 
 ```bash
-scp -P 2222 kimchi_windows_amd64.tar.gz Administrator@127.0.0.1:
+scp -P 2222 kimchi_windows_amd64.zip Administrator@127.0.0.1:
 ssh -p 2222 Administrator@127.0.0.1
 ```
 
@@ -175,7 +175,7 @@ Inside Windows:
 ```powershell
 Remove-Item -Recurse -Force C:\kimchi-test -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force C:\kimchi-test | Out-Null
-tar -xzf $env:USERPROFILE\kimchi_windows_amd64.tar.gz -C C:\kimchi-test
+Expand-Archive -LiteralPath $env:USERPROFILE\kimchi_windows_amd64.zip -DestinationPath C:\kimchi-test -Force
 
 cd C:\kimchi-test
 .\bin\kimchi.exe --version
@@ -211,7 +211,7 @@ useful for quick terminal/proxy smoke checks:
 ```bash
 pnpm install
 pnpm run build:binary-windows-x64
-tar -czf kimchi_windows_amd64.tar.gz -C dist bin share
+(cd dist && zip -r ../kimchi_windows_amd64.zip bin share)
 ```
 
 Linux cross-builds externalize the Windows clipboard native addon because that
