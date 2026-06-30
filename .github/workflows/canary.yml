@@ -112,6 +112,10 @@ jobs:
             os: windows
             arch: amd64
             runner: windows-latest
+          - target: windows-x64-baseline
+            os: windows
+            arch: amd64_baseline
+            runner: windows-latest
 
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -136,6 +140,20 @@ jobs:
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+
+      - name: Install baseline Bun (Windows, no AVX2)
+        if: ${{ matrix.target == 'windows-x64-baseline' }}
+        shell: pwsh
+        run: |
+          $url = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64-baseline.zip"
+          $dest = "$env:RUNNER_TEMP\bun-baseline"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "$dest\bun.zip"
+          Expand-Archive -Path "$dest\bun.zip" -DestinationPath $dest -Force
+          $binDir = Get-ChildItem -Path $dest -Directory | Where-Object { $_.Name -like "bun-windows-x64-baseline*" } | Select-Object -First 1
+          Copy-Item "$($binDir.FullName)\bun.exe" "$dest\bun.exe"
+          Add-Content $env:GITHUB_PATH $dest
+          & "$dest\bun.exe" --version
 
       - name: Build Windows proxy-helper
         if: ${{ matrix.os == 'windows' }}
