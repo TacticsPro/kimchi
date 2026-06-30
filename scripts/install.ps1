@@ -174,6 +174,10 @@ function Install-Kimchi {
   $version = Get-EnvOrDefault "KIMCHI_VERSION" "latest"
   $installRoot = Get-EnvOrDefault "KIMCHI_INSTALL_DIR" (Get-DefaultInstallRoot)
   $arch = Get-WindowsArch
+  # NOTE: the "_baseline" suffix here must exactly match the asset_suffix
+  # used for the windows-x64-baseline matrix entry in
+  # .github/workflows/release.yml and canary.yml (kimchi_<os>_<arch><asset_suffix>.zip).
+  # If that suffix or separator ever changes, update both places together.
   $assetName = if (Test-Avx2Supported) {
     "kimchi_windows_${arch}.zip"
   } else {

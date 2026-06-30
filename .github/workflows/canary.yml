@@ -114,7 +114,8 @@ jobs:
             runner: windows-latest
           - target: windows-x64-baseline
             os: windows
-            arch: amd64_baseline
+            arch: amd64
+            asset_suffix: _baseline
             runner: windows-latest
 
     runs-on: ${{ matrix.runner }}
@@ -143,17 +144,7 @@ jobs:
 
       - name: Install baseline Bun (Windows, no AVX2)
         if: ${{ matrix.target == 'windows-x64-baseline' }}
-        shell: pwsh
-        run: |
-          $url = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64-baseline.zip"
-          $dest = "$env:RUNNER_TEMP\bun-baseline"
-          New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Invoke-WebRequest -Uri $url -OutFile "$dest\bun.zip"
-          Expand-Archive -Path "$dest\bun.zip" -DestinationPath $dest -Force
-          $binDir = Get-ChildItem -Path $dest -Directory | Where-Object { $_.Name -like "bun-windows-x64-baseline*" } | Select-Object -First 1
-          Copy-Item "$($binDir.FullName)\bun.exe" "$dest\bun.exe"
-          Add-Content $env:GITHUB_PATH $dest
-          & "$dest\bun.exe" --version
+        uses: ./.github/actions/setup-bun-baseline
 
       - name: Build Windows proxy-helper
         if: ${{ matrix.os == 'windows' }}
@@ -214,13 +205,13 @@ jobs:
           }
 
       - name: Package release asset
-        run: node scripts/package-release-asset.js --os ${{ matrix.os }} --arch ${{ matrix.arch }}
+        run: node scripts/package-release-asset.js --os ${{ matrix.os }} --arch ${{ matrix.arch }}${{ matrix.asset_suffix }}
 
       - name: Verify Windows installer
         if: ${{ matrix.os == 'windows' }}
         shell: pwsh
         env:
-          KIMCHI_ARCHIVE_PATH: kimchi_${{ matrix.os }}_${{ matrix.arch }}.zip
+          KIMCHI_ARCHIVE_PATH: kimchi_${{ matrix.os }}_${{ matrix.arch }}${{ matrix.asset_suffix }}.zip
           KIMCHI_INSTALL_DIR: ${{ runner.temp }}\kimchi-install
           KIMCHI_SKIP_PATH_UPDATE: "1"
         run: |
@@ -230,8 +221,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kimchi_${{ matrix.os }}_${{ matrix.arch }}
-          path: kimchi_${{ matrix.os }}_${{ matrix.arch }}.*
+          name: kimchi_${{ matrix.os }}_${{ matrix.arch }}${{ matrix.asset_suffix }}
+          path: kimchi_${{ matrix.os }}_${{ matrix.arch }}${{ matrix.asset_suffix }}.*
 
   smoke-test:
     needs: [preflight, build]
