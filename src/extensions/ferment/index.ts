@@ -26,6 +26,8 @@ import { registerFermentCommands } from "./commands.js"
 import { decideContinuation } from "./continuation.js"
 import { registerFermentEvents } from "./events.js"
 import { FERMENT_STOP_POLICY_SHORTCUT, canToggleFermentStopPolicy } from "./footer-status.js"
+import { deletePendingProposal } from "./pending-proposal-store.js"
+import { setPendingPlanReviewTrigger } from "./plan-review-trigger.js"
 import { type PendingPlanReview, promptPlanReview } from "./plan-review.js"
 import { buildFermentPromptBlock } from "./prompt-block.js"
 import { type FermentRuntime, defaultFermentRuntime } from "./runtime.js"
@@ -155,6 +157,7 @@ export default function fermentExtension(pi: ExtensionAPI, runtime: FermentRunti
 			const outcome = await promptPlanReview(ctx, { planMarkdown: review.planMarkdown })
 			if (!outcome) return
 			if (outcome.kind === "cancelled") {
+				deletePendingProposal(review.fermentId)
 				return
 			}
 
@@ -192,6 +195,19 @@ export default function fermentExtension(pi: ExtensionAPI, runtime: FermentRunti
 			planReviewRunning = false
 		}
 	}
+
+	// Register the plan-review trigger so `resumeFerment` can present a
+	// re-armed review directly (no LLM turn) after hydrating from the sidecar.
+	setPendingPlanReviewTrigger((triggerCtx) => {
+		const review = runtime.getCurrentPendingPlanReview()
+		if (!planReviewRunning && review) {
+			clearPlanReviewTimer()
+			planReviewTimer = setTimeout(() => {
+				planReviewTimer = undefined
+				void runPendingPlanReview(triggerCtx, review)
+			}, 0)
+		}
+	})
 
 	pi.on("session_start", (_event, _ctx) => {
 		ctx = _ctx
